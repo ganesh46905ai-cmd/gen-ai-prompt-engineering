@@ -15,7 +15,6 @@ export async function runGatewayText(options: {
   instructions: string;
   messages: ModelMessage[];
   model?: string;
-  jsonSchema?: { name: string; schema: Record<string, unknown> };
 }): Promise<string> {
   const apiKey = process.env["LOVABLE_API_KEY"];
   if (!apiKey) {
@@ -36,15 +35,6 @@ export async function runGatewayText(options: {
     instructions: options.instructions,
     messages: options.messages,
     maxRetries: 0,
-    ...(options.jsonSchema
-      ? {
-          output: {
-            type: "json" as const,
-            name: options.jsonSchema.name,
-            schema: options.jsonSchema.schema,
-          },
-        }
-      : {}),
     providerOptions: {
       openai: {
         store: false,
