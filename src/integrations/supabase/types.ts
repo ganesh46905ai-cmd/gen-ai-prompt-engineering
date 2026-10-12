@@ -14,7 +14,106 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      conversations: {
+        Row: {
+          created_at: string
+          id: string
+          prompt_version_id: string | null
+          title: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          prompt_version_id?: string | null
+          title?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          prompt_version_id?: string | null
+          title?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conversations_prompt_version_id_fkey"
+            columns: ["prompt_version_id"]
+            isOneToOne: false
+            referencedRelation: "prompt_versions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      messages: {
+        Row: {
+          content: string
+          conversation_id: string
+          created_at: string
+          eval_feedback: string | null
+          eval_score: number | null
+          id: string
+          role: string
+          used_fallback: boolean
+        }
+        Insert: {
+          content: string
+          conversation_id: string
+          created_at?: string
+          eval_feedback?: string | null
+          eval_score?: number | null
+          id?: string
+          role: string
+          used_fallback?: boolean
+        }
+        Update: {
+          content?: string
+          conversation_id?: string
+          created_at?: string
+          eval_feedback?: string | null
+          eval_score?: number | null
+          id?: string
+          role?: string
+          used_fallback?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "messages_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      prompt_versions: {
+        Row: {
+          created_at: string
+          fallback_prompt: string
+          id: string
+          name: string
+          system_prompt: string
+          tone: string
+          use_case: string
+        }
+        Insert: {
+          created_at?: string
+          fallback_prompt?: string
+          id?: string
+          name: string
+          system_prompt: string
+          tone?: string
+          use_case: string
+        }
+        Update: {
+          created_at?: string
+          fallback_prompt?: string
+          id?: string
+          name?: string
+          system_prompt?: string
+          tone?: string
+          use_case?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
