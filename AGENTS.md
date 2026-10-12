@@ -8,3 +8,6 @@
 > Commits you push to the connected branch sync back to Lovable and show up in
 > the editor, so keep the branch in a working state.
 <!-- LOVABLE:END -->
+
+## Architecture
+- AI calls go through src/lib/ai/gateway.server.ts (Lovable AI Gateway, Responses API, streamText consumed server-side); server functions live in src/lib/studio.functions.ts and use supabaseAdmin loaded inside handlers.
