@@ -87,8 +87,8 @@ export const sendMessage = createServerFn({ method: "POST" })
       config: PromptConfig;
       history: ChatTurn[];
       message: string;
-      conversationId?: string;
-      promptVersionId?: string;
+      conversationId?: string | undefined;
+      promptVersionId?: string | undefined;
     }) => input,
   )
   .handler(async ({ data }) => {
