@@ -8,6 +8,7 @@ export interface PromptConfig {
   systemPrompt: string;
   fallbackPrompt: string;
   tone: string;
+  knowledge?: string | undefined;
 }
 
 export interface ChatTurn {
@@ -26,7 +27,23 @@ export interface EvalResult {
 const FALLBACK_TRIGGER =
   "I don't have enough reliable information to answer that accurately";
 
-function buildInstructions(config: PromptConfig): string {
+/** Simple keyword retrieval over the external knowledge base (RAG). */
+export function retrieveSources(knowledge: string, query: string, k = 3): string[] {
+  const words = (s: string) =>
+    new Set(s.toLowerCase().match(/[a-z0-9]{3,}/g) ?? []);
+  const q = words(query);
+  return knowledge
+    .split(/\n+/)
+    .map((c) => c.trim())
+    .filter(Boolean)
+    .map((c) => ({ c, s: [...words(c)].filter((w) => q.has(w)).length }))
+    .filter((x) => x.s > 0)
+    .sort((a, b) => b.s - a.s)
+    .slice(0, k)
+    .map((x) => x.c);
+}
+
+function buildInstructions(config: PromptConfig, sources: string[]): string {
   return [
     `You are the production assistant for this business use case: ${config.useCase}.`,
     "",
@@ -35,9 +52,12 @@ function buildInstructions(config: PromptConfig): string {
     "",
     `Tone requirement: ${config.tone}.`,
     "",
+    "RETRIEVED KNOWLEDGE (from the external knowledge base; prefer these facts):",
+    sources.length ? sources.map((s, i) => `[${i + 1}] ${s}`).join("\n") : "(no matching documents)",
+    "",
     "CONTEXT & MEMORY RULES:",
     "- Use the full conversation history to resolve references like \"it\", \"that\", or \"the last one\".",
-    "- Never invent facts, prices, policies, or capabilities not implied by the system prompt.",
+    "- Never invent facts, prices, policies, or capabilities not implied by the system prompt or retrieved knowledge.",
     "",
     "FALLBACK RULE:",
     `- If the request is outside the use case, or you cannot answer reliably, respond with the fallback behavior instead of guessing: ${config.fallbackPrompt}`,
