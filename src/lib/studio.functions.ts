@@ -138,8 +138,10 @@ export const sendMessage = createServerFn({ method: "POST" })
       { role: "user", content: data.message },
     ];
 
+    const lastUser = [...data.history].reverse().find((t) => t.role === "user")?.content ?? "";
+    const sources = retrieveSources(data.config.knowledge ?? "", `${data.message} ${lastUser}`);
     const answer = await runGatewayText({
-      instructions: buildInstructions(data.config),
+      instructions: buildInstructions(data.config, sources),
       messages,
     });
 
@@ -155,7 +157,7 @@ export const sendMessage = createServerFn({ method: "POST" })
       eval_feedback: evaluation?.feedback ?? null,
     });
 
-    return { conversationId, answer, usedFallback, evaluation };
+    return { conversationId, answer, usedFallback, evaluation, sources };
   });
 
 export const listPromptVersions = createServerFn({ method: "GET" }).handler(async () => {
