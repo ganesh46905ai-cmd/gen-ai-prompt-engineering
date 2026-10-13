@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useRef, useState } from "react";
 import { Toaster, toast } from "sonner";
@@ -34,7 +34,7 @@ export const Route = createFileRoute("/")({
   component: Studio,
 });
 
-type Msg = ChatTurn & { usedFallback?: boolean; evaluation?: EvalResult | null };
+type Msg = ChatTurn & { usedFallback?: boolean; evaluation?: EvalResult | null; sources?: string[] };
 
 const PRESETS: Record<string, PromptConfig> = {
   "Customer Support": {
@@ -44,6 +44,8 @@ const PRESETS: Record<string, PromptConfig> = {
     fallbackPrompt:
       "Politely say you can't help with that and offer to connect the user to a human agent.",
     tone: "friendly and reassuring",
+    knowledge:
+      "Debit card replacement arrives in 5-7 business days, free of charge.\nUPI transfer limit is Rs 1,00,000 per day.\nNEFT transfers settle within 2 hours on working days.\nApp login issues: update the app, clear cache, then reset via 'Forgot password'.\nSavings account interest rate is 3.5% per year.",
   },
   "HR Policy Assistant": {
     useCase: "Internal HR policy Q&A for employees of a mid-size IT company",
@@ -51,6 +53,8 @@ const PRESETS: Record<string, PromptConfig> = {
       "You answer employee questions on leave, work-from-home, payroll dates and benefits. Policy: 24 paid leaves/year, 3 WFH days/week, salary credited on the last working day. Keep answers under 120 words.",
     fallbackPrompt: "Advise the employee to email hr@company.com for anything not covered.",
     tone: "professional and concise",
+    knowledge:
+      "Maternity leave is 26 weeks paid.\nPaternity leave is 10 working days.\nHealth insurance covers employee, spouse and 2 children up to Rs 5 lakh.\nLeave requests are submitted on the HRMS portal 3 days in advance.",
   },
   "Course Advisor": {
     useCase: "Learning-path advisor for an online tech education platform",
@@ -58,6 +62,8 @@ const PRESETS: Record<string, PromptConfig> = {
       "Recommend courses in Python, Data Science, Web Development and Generative AI based on the learner's background and goal. Always explain WHY each course fits, and suggest an order.",
     fallbackPrompt: "Explain that you only advise on the platform's tech courses.",
     tone: "encouraging mentor",
+    knowledge:
+      "Python Foundations: 6 weeks, beginner, no prerequisites.\nData Science with Pandas: 8 weeks, requires Python Foundations.\nFull-Stack Web Dev: 12 weeks, HTML/CSS/JS/React.\nGenerative AI & Prompt Engineering: 6 weeks, requires basic Python.",
   },
 };
 
@@ -113,6 +119,7 @@ function Studio() {
           content: res.answer,
           usedFallback: res.usedFallback,
           evaluation: res.evaluation,
+          sources: res.sources,
         },
       ]);
     } catch (e) {
@@ -144,6 +151,7 @@ function Studio() {
       systemPrompt: v.system_prompt,
       fallbackPrompt: v.fallback_prompt,
       tone: v.tone,
+      knowledge: config.knowledge,
     });
     setActiveVersionId(v.id);
     resetChat();
@@ -200,6 +208,14 @@ function Studio() {
           value={config.tone}
           onChange={(e) => setConfig({ ...config, tone: e.target.value })}
           className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+        />
+      </Field>
+      <Field label="Knowledge base (external data source · one fact per line)">
+        <textarea
+          rows={5}
+          value={config.knowledge ?? ""}
+          onChange={(e) => setConfig({ ...config, knowledge: e.target.value })}
+          className="w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-xs outline-none focus:border-primary"
         />
       </Field>
       <button
@@ -261,12 +277,17 @@ function Studio() {
               end-to-end generative AI · advanced prompt engineering
             </p>
           </div>
+          <div className="flex gap-2">
+          <Link to="/docs" className="rounded-md border border-border px-3 py-1.5 text-xs transition hover:border-primary hover:text-primary">
+            Docs
+          </Link>
           <button
             onClick={resetChat}
             className="rounded-md border border-border px-3 py-1.5 text-xs transition hover:border-primary hover:text-primary"
           >
             New chat
           </button>
+          </div>
         </div>
       </header>
 
@@ -336,6 +357,11 @@ function Studio() {
                           title={m.evaluation.feedback}
                         >
                           QUALITY {m.evaluation.score}/100
+                        </span>
+                      )}
+                      {m.sources && m.sources.length > 0 && (
+                        <span className="rounded bg-accent px-1.5 py-0.5 text-accent-foreground" title={m.sources.join("\n")}>
+                          {m.sources.length} SOURCE{m.sources.length > 1 ? "S" : ""}
                         </span>
                       )}
                       {m.evaluation?.feedback && (
