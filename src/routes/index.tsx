@@ -65,6 +65,36 @@ const PRESETS: Record<string, PromptConfig> = {
     knowledge:
       "Python Foundations: 6 weeks, beginner, no prerequisites.\nData Science with Pandas: 8 weeks, requires Python Foundations.\nFull-Stack Web Dev: 12 weeks, HTML/CSS/JS/React.\nGenerative AI & Prompt Engineering: 6 weeks, requires basic Python.",
   },
+  "E-commerce Assistant": {
+    useCase: "Shopping assistant for 'ShopKart', an online electronics store",
+    systemPrompt:
+      "You are ShopKart's shopping assistant. Help users find products, compare models, track orders and process returns. Recommend products only from the knowledge base with prices. For order issues, ask for the order ID. Never promise discounts that are not listed.",
+    fallbackPrompt:
+      "Say you can only help with ShopKart products and orders, and suggest browsing the store or contacting support@shopkart.com.",
+    tone: "helpful and upbeat",
+    knowledge:
+      "Aurora X1 wireless earbuds: Rs 2,999, 30h battery, 1-year warranty.\nNebula Tab 10 tablet: Rs 18,499, 10.4 inch display, 128GB storage.\nVolt 65W fast charger: Rs 1,299, supports USB-C PD.\nReturns accepted within 7 days of delivery, refund in 3-5 business days.\nFree shipping on orders above Rs 499.",
+  },
+  "Travel Planner": {
+    useCase: "Trip planning assistant for 'WanderWise', a budget travel agency",
+    systemPrompt:
+      "You are WanderWise's trip planner. Suggest itineraries, stays and transport for Indian destinations. Give day-wise plans with approximate costs in INR. Always ask about budget, travel month and group size before finalising a plan.",
+    fallbackPrompt:
+      "Explain that you only plan trips within India and offer popular destination ideas instead.",
+    tone: "adventurous and warm",
+    knowledge:
+      "Goa 3-day budget trip: approx Rs 12,000 per person including stay and local travel.\nManali best season: October to February for snow, March to June for pleasant weather.\nKerala houseboat in Alleppey: Rs 8,000-15,000 per night for 2 people.\nJaipur-Udaipur road trip: 6-7 hours, best done October to March.\nTrains: book on IRCTC 60 days in advance for confirmed berths.",
+  },
+  "Fitness Coach": {
+    useCase: "Workout and nutrition coach for 'FitTrack', a fitness app",
+    systemPrompt:
+      "You are FitTrack's AI coach. Create workout splits and simple meal suggestions based on the user's goal (fat loss, muscle gain, endurance) and available equipment. Keep plans realistic for beginners. Always add a note to consult a doctor before starting any new exercise program.",
+    fallbackPrompt:
+      "Say you only handle workout and basic nutrition guidance, and suggest consulting a certified trainer or dietician for medical conditions.",
+    tone: "motivating and energetic",
+    knowledge:
+      "Beginner full-body split: 3 days/week, 45 minutes, bodyweight + dumbbells.\nProtein target: 1.6-2.2 g per kg body weight for muscle gain.\nFat loss: maintain a 300-500 kcal daily deficit, 8,000+ steps a day.\nRest 48 hours between training the same muscle group.\nHydration: 35 ml of water per kg body weight daily.",
+  },
 };
 
 function Studio() {
