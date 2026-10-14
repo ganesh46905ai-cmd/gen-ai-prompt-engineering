@@ -308,6 +308,13 @@ function Studio() {
             </p>
           </div>
           <div className="flex gap-2">
+          <a
+            href="/downloads/PromptForge_Capstone_Dossier.pdf"
+            download="PromptForge_Capstone_Dossier.pdf"
+            className="rounded-md border border-border px-3 py-1.5 text-xs transition hover:border-primary hover:text-primary"
+          >
+            Dossier
+          </a>
           <Link to="/docs" className="rounded-md border border-border px-3 py-1.5 text-xs transition hover:border-primary hover:text-primary">
             Docs
           </Link>
