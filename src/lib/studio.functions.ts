@@ -9,6 +9,7 @@ export interface PromptConfig {
   fallbackPrompt: string;
   tone: string;
   knowledge?: string | undefined;
+  examples?: string | undefined;
 }
 
 export interface ChatTurn {
@@ -22,6 +23,22 @@ export interface EvalResult {
   clarity: number;
   toneMatch: number;
   feedback: string;
+}
+
+export interface ComparisonSide {
+  answer: string;
+  usedFallback: boolean;
+  evaluation: EvalResult | null;
+  sources: string[];
+  latencyMs: number;
+}
+
+export interface AnalyticsResult {
+  conversations: number;
+  assistantMessages: number;
+  fallbackRate: number;
+  avgScore: number | null;
+  scores: { score: number; created_at: string }[];
 }
 
 const FALLBACK_TRIGGER =
@@ -44,25 +61,35 @@ export function retrieveSources(knowledge: string, query: string, k = 3): string
 }
 
 function buildInstructions(config: PromptConfig, sources: string[]): string {
-  return [
+  const blocks = [
     `You are the production assistant for this business use case: ${config.useCase}.`,
     "",
     "SYSTEM PROMPT (authoritative behavior specification written by the prompt engineer):",
     config.systemPrompt,
     "",
     `Tone requirement: ${config.tone}.`,
+  ];
+  if (config.examples?.trim()) {
+    blocks.push(
+      "",
+      "FEW-SHOT EXAMPLES (mirror the demonstrated input → output style and structure):",
+      config.examples.trim(),
+    );
+  }
+  blocks.push(
     "",
     "RETRIEVED KNOWLEDGE (from the external knowledge base; prefer these facts):",
     sources.length ? sources.map((s, i) => `[${i + 1}] ${s}`).join("\n") : "(no matching documents)",
     "",
     "CONTEXT & MEMORY RULES:",
     "- Use the full conversation history to resolve references like \"it\", \"that\", or \"the last one\".",
-    "- Never invent facts, prices, policies, or capabilities not implied by the system prompt or retrieved knowledge.",
+    "- Never invent facts, prices, policies, or capabilities not implied by the system prompt, few-shot examples, or retrieved knowledge.",
     "",
     "FALLBACK RULE:",
     `- If the request is outside the use case, or you cannot answer reliably, respond with the fallback behavior instead of guessing: ${config.fallbackPrompt}`,
     `- When you trigger the fallback, begin your reply with the exact marker "${FALLBACK_TRIGGER}" so the system can log it.`,
-  ].join("\n");
+  );
+  return blocks.join("\n");
 }
 
 async function evaluateAnswer(
@@ -113,6 +140,7 @@ export const sendMessage = createServerFn({ method: "POST" })
   )
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const startedAt = Date.now();
 
     // Conversation logging: create a conversation row on the first turn.
     let conversationId = data.conversationId;
@@ -147,6 +175,7 @@ export const sendMessage = createServerFn({ method: "POST" })
 
     const usedFallback = answer.includes(FALLBACK_TRIGGER);
     const evaluation = usedFallback ? null : await evaluateAnswer(data.config, data.message, answer);
+    const latencyMs = Date.now() - startedAt;
 
     await supabaseAdmin.from("messages").insert({
       conversation_id: conversationId,
@@ -157,8 +186,71 @@ export const sendMessage = createServerFn({ method: "POST" })
       eval_feedback: evaluation?.feedback ?? null,
     });
 
-    return { conversationId, answer, usedFallback, evaluation, sources };
+    return { conversationId, answer, usedFallback, evaluation, sources, latencyMs };
   });
+
+/** Advanced technique: run one question through two prompt configurations side by side. */
+export const runComparison = createServerFn({ method: "POST" })
+  .inputValidator((input: { question: string; a: PromptConfig; b: PromptConfig }) => input)
+  .handler(async ({ data }) => {
+    const run = async (config: PromptConfig): Promise<ComparisonSide> => {
+      const startedAt = Date.now();
+      const sources = retrieveSources(config.knowledge ?? "", data.question);
+      const answer = await runGatewayText({
+        instructions: buildInstructions(config, sources),
+        messages: [{ role: "user", content: data.question }],
+      });
+      const usedFallback = answer.includes(FALLBACK_TRIGGER);
+      const evaluation = usedFallback ? null : await evaluateAnswer(config, data.question, answer);
+      return {
+        answer,
+        usedFallback,
+        evaluation,
+        sources,
+        latencyMs: Date.now() - startedAt,
+      };
+    };
+    const [a, b] = await Promise.all([run(data.a), run(data.b)]);
+    return { a, b };
+  });
+
+/** Advanced technique: aggregate all-time quality metrics from the logged conversations. */
+export const getAnalytics = createServerFn({ method: "GET" }).handler(
+  async (): Promise<AnalyticsResult> => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const [convoRes, msgRes] = await Promise.all([
+      supabaseAdmin.from("conversations").select("id", { count: "exact", head: true }),
+      supabaseAdmin
+        .from("messages")
+        .select("role, used_fallback, eval_score, created_at")
+        .order("created_at", { ascending: false })
+        .limit(500),
+    ]);
+    if (convoRes.error) throw new Error(convoRes.error.message);
+    if (msgRes.error) throw new Error(msgRes.error.message);
+
+    const rows = msgRes.data ?? [];
+    const assistant = rows.filter((r) => r.role === "assistant");
+    const fallbacks = assistant.filter((r) => r.used_fallback).length;
+    const scored = assistant
+      .filter((r) => typeof r.eval_score === "number")
+      .reverse();
+
+    return {
+      conversations: convoRes.count ?? 0,
+      assistantMessages: assistant.length,
+      fallbackRate: assistant.length
+        ? Math.round((fallbacks / assistant.length) * 100)
+        : 0,
+      avgScore: scored.length
+        ? Math.round(scored.reduce((s, r) => s + (r.eval_score ?? 0), 0) / scored.length)
+        : null,
+      scores: scored
+        .slice(-20)
+        .map((r) => ({ score: r.eval_score as number, created_at: r.created_at })),
+    };
+  },
+);
 
 export const listPromptVersions = createServerFn({ method: "GET" }).handler(async () => {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
