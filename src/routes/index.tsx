@@ -4,7 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import { Toaster, toast } from "sonner";
 
 import {
+  getAnalytics,
   listPromptVersions,
+  runComparison,
   savePromptVersion,
   sendMessage,
   type ChatTurn,
@@ -19,13 +21,13 @@ export const Route = createFileRoute("/")({
       {
         name: "description",
         content:
-          "Build, test and evaluate production-style AI prompts with memory, versioning, fallback handling and automatic quality scoring.",
+          "Build, test and evaluate production-style AI prompts with memory, versioning, A/B comparison, fallback handling and automatic quality scoring.",
       },
       { property: "og:title", content: "PromptForge Studio — End-to-End Generative AI App" },
       {
         property: "og:description",
         content:
-          "Prompt architecture, context memory, prompt versions and AI response scoring in one studio.",
+          "Prompt architecture, context memory, A/B testing, prompt versions and AI response scoring in one studio.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -34,7 +36,12 @@ export const Route = createFileRoute("/")({
   component: Studio,
 });
 
-type Msg = ChatTurn & { usedFallback?: boolean; evaluation?: EvalResult | null; sources?: string[] };
+type Msg = ChatTurn & {
+  usedFallback?: boolean;
+  evaluation?: EvalResult | null;
+  sources?: string[];
+  latencyMs?: number;
+};
 
 const PRESETS: Record<string, PromptConfig> = {
   "Customer Support": {
@@ -101,6 +108,8 @@ function Studio() {
   const send = useServerFn(sendMessage);
   const listVersions = useServerFn(listPromptVersions);
   const saveVersion = useServerFn(savePromptVersion);
+  const compare = useServerFn(runComparison);
+  const loadAnalytics = useServerFn(getAnalytics);
 
   const [config, setConfig] = useState<PromptConfig>(PRESETS["Customer Support"]!);
   const [messages, setMessages] = useState<Msg[]>([]);
@@ -109,12 +118,25 @@ function Studio() {
   const [conversationId, setConversationId] = useState<string>();
   const [versions, setVersions] = useState<Awaited<ReturnType<typeof listPromptVersions>>>([]);
   const [activeVersionId, setActiveVersionId] = useState<string>();
-  const [tab, setTab] = useState<"prompt" | "chat" | "metrics">("chat");
+  const [tab, setTab] = useState<"prompt" | "chat" | "compare" | "metrics">("chat");
+  const [view, setView] = useState<"chat" | "compare">("chat");
+  const [dbStats, setDbStats] = useState<Awaited<ReturnType<typeof getAnalytics>> | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  // A/B comparison state
+  const [cmpA, setCmpA] = useState("current");
+  const [cmpB, setCmpB] = useState("current");
+  const [cmpQuestion, setCmpQuestion] = useState("");
+  const [cmpLoading, setCmpLoading] = useState(false);
+  const [cmpResult, setCmpResult] = useState<Awaited<ReturnType<typeof runComparison>> | null>(null);
 
   useEffect(() => {
     listVersions().then(setVersions).catch(() => {});
   }, [listVersions]);
+
+  useEffect(() => {
+    loadAnalytics().then(setDbStats).catch(() => {});
+  }, [loadAnalytics]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -150,6 +172,7 @@ function Studio() {
           usedFallback: res.usedFallback,
           evaluation: res.evaluation,
           sources: res.sources,
+          latencyMs: res.latencyMs,
         },
       ]);
     } catch (e) {
@@ -159,6 +182,41 @@ function Studio() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleCompare() {
+    const q = cmpQuestion.trim();
+    if (!q || cmpLoading) return;
+    setCmpLoading(true);
+    setCmpResult(null);
+    try {
+      const res = await compare({ data: { question: q, a: configFor(cmpA), b: configFor(cmpB) } });
+      setCmpResult(res);
+      loadAnalytics().then(setDbStats).catch(() => {});
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Comparison failed");
+    } finally {
+      setCmpLoading(false);
+    }
+  }
+
+  function configFor(sel: string): PromptConfig {
+    if (sel === "current") return config;
+    const v = versions.find((x) => x.id === sel);
+    return v
+      ? {
+          useCase: v.use_case,
+          systemPrompt: v.system_prompt,
+          fallbackPrompt: v.fallback_prompt,
+          tone: v.tone,
+          knowledge: config.knowledge,
+        }
+      : config;
+  }
+
+  function selName(sel: string): string {
+    if (sel === "current") return "Current editor config";
+    return versions.find((x) => x.id === sel)?.name ?? sel;
   }
 
   async function handleSaveVersion() {
@@ -182,6 +240,7 @@ function Studio() {
       fallbackPrompt: v.fallback_prompt,
       tone: v.tone,
       knowledge: config.knowledge,
+      examples: config.examples,
     });
     setActiveVersionId(v.id);
     resetChat();
@@ -240,6 +299,15 @@ function Studio() {
           className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
         />
       </Field>
+      <Field label="Few-shot examples (optional · show the assistant 1-2 ideal Q→A patterns)">
+        <textarea
+          rows={4}
+          value={config.examples ?? ""}
+          onChange={(e) => setConfig({ ...config, examples: e.target.value })}
+          placeholder={"User: How do I block my card?\nAssistant: 1. Open the app… (write the exact style you want)"}
+          className="w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-xs outline-none focus:border-primary"
+        />
+      </Field>
       <Field label="Knowledge base (external data source · one fact per line)">
         <textarea
           rows={5}
@@ -287,11 +355,298 @@ function Studio() {
       <Metric label="Clarity" value={scored.length ? `${avg("clarity")}` : "—"} suffix="/10" />
       <Metric label="Tone match" value={scored.length ? `${avg("toneMatch")}` : "—"} suffix="/10" />
       <Metric label="Fallbacks" value={`${fallbacks}`} />
+      <div className="col-span-2 mt-1 border-t border-border pt-3">
+        <p className="mb-2 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+          All-time · every logged conversation
+        </p>
+        <div className="grid grid-cols-3 gap-2">
+          <Metric label="Conversations" value={`${dbStats?.conversations ?? "—"}`} />
+          <Metric
+            label="Avg score"
+            value={dbStats?.avgScore != null ? `${dbStats.avgScore}` : "—"}
+            suffix="/100"
+          />
+          <Metric
+            label="Fallback rate"
+            value={dbStats ? `${dbStats.fallbackRate}%` : "—"}
+          />
+        </div>
+        {dbStats && dbStats.scores.length > 0 && (
+          <div className="mt-3">
+            <p className="mb-1 text-[10px] text-muted-foreground">
+              Last {dbStats.scores.length} scored answers
+            </p>
+            <div className="flex h-16 items-end gap-1">
+              {dbStats.scores.map((s, i) => (
+                <div
+                  key={i}
+                  className={`flex-1 rounded-t ${s.score >= 75 ? "bg-success/70" : "bg-warning/70"}`}
+                  style={{ height: `${Math.max(8, s.score)}%` }}
+                  title={`${s.score}/100 · ${new Date(s.created_at).toLocaleString()}`}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
       <p className="col-span-2 text-xs leading-relaxed text-muted-foreground">
         Every answer is scored by a second AI evaluator against your system prompt and tone. Every
-        conversation is logged with its prompt version.
+        conversation is logged with its prompt version, so all-time metrics aggregate across every
+        session and prompt variant.
       </p>
     </section>
+  );
+
+  const chatBody = (
+    <>
+      <div className="flex items-center justify-between border-b border-border px-5 py-3">
+        <div>
+          <PanelTitle>Live conversation</PanelTitle>
+          <p className="-mt-2 truncate text-xs text-muted-foreground">{config.useCase}</p>
+        </div>
+        <button
+          onClick={() => {
+            setView("compare");
+            setTab("compare");
+          }}
+          className="shrink-0 rounded-md border border-border px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground transition hover:border-primary hover:text-primary"
+        >
+          A/B compare
+        </button>
+      </div>
+      <div className="flex-1 space-y-4 overflow-y-auto p-5">
+        {messages.length === 0 && (
+          <div className="flex h-full flex-col items-center justify-center text-center">
+            <p className="text-lg font-semibold">Test your prompt</p>
+            <p className="mt-1 max-w-sm text-sm text-muted-foreground">
+              Ask an in-scope question, a follow-up that needs memory, then an off-topic one to
+              see the fallback trigger.
+            </p>
+          </div>
+        )}
+        {messages.map((m, i) => (
+          <div key={i} className={m.role === "user" ? "flex justify-end" : "flex justify-start"}>
+            <div
+              className={`max-w-[85%] rounded-xl px-4 py-3 text-sm leading-relaxed ${
+                m.role === "user"
+                  ? "bg-primary text-primary-foreground"
+                  : "border border-border bg-secondary text-secondary-foreground"
+              }`}
+            >
+              <p className="whitespace-pre-wrap">{m.content}</p>
+              {m.role === "assistant" && (
+                <div className="mt-2 flex flex-wrap items-center gap-2 font-mono text-[10px]">
+                  {m.usedFallback && (
+                    <span className="rounded bg-warning/20 px-1.5 py-0.5 text-warning">
+                      FALLBACK
+                    </span>
+                  )}
+                  {m.evaluation && (
+                    <span
+                      className={`rounded px-1.5 py-0.5 ${
+                        m.evaluation.score >= 75
+                          ? "bg-success/20 text-success"
+                          : "bg-warning/20 text-warning"
+                      }`}
+                      title={m.evaluation.feedback}
+                    >
+                      QUALITY {m.evaluation.score}/100
+                    </span>
+                  )}
+                  {m.latencyMs != null && (
+                    <span className="text-muted-foreground">
+                      ⚡ {(m.latencyMs / 1000).toFixed(1)}s
+                    </span>
+                  )}
+                  {m.sources && m.sources.length > 0 && (
+                    <span className="rounded bg-accent px-1.5 py-0.5 text-accent-foreground" title={m.sources.join("\n")}>
+                      {m.sources.length} SOURCE{m.sources.length > 1 ? "S" : ""}
+                    </span>
+                  )}
+                  {m.evaluation?.feedback && (
+                    <span className="text-muted-foreground">{m.evaluation.feedback}</span>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+        {loading && (
+          <div className="font-mono text-xs text-muted-foreground animate-pulse">
+            generating + evaluating…
+          </div>
+        )}
+        <div ref={bottomRef} />
+      </div>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          handleSend();
+        }}
+        className="flex gap-2 border-t border-border p-3"
+      >
+        <input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder="Type a user message…"
+          className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+        />
+        <button
+          disabled={loading || !input.trim()}
+          className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition hover:opacity-90 disabled:opacity-40"
+        >
+          Send
+        </button>
+      </form>
+    </>
+  );
+
+  const aScore = cmpResult?.a.evaluation?.score ?? null;
+  const bScore = cmpResult?.b.evaluation?.score ?? null;
+  const winner =
+    aScore != null && bScore != null ? (aScore === bScore ? "tie" : aScore > bScore ? "A" : "B") : null;
+
+  const compareBody = (
+    <>
+      <div className="flex items-center justify-between border-b border-border px-5 py-3">
+        <div>
+          <PanelTitle>A/B prompt comparison</PanelTitle>
+          <p className="-mt-2 text-xs text-muted-foreground">
+            Run the same question through two prompt configurations side by side.
+          </p>
+        </div>
+        <button
+          onClick={() => {
+            setView("chat");
+            setTab("chat");
+          }}
+          className="shrink-0 rounded-md border border-border px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground transition hover:border-primary hover:text-primary"
+        >
+          ← Chat
+        </button>
+      </div>
+      <div className="flex-1 space-y-4 overflow-y-auto p-5">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Variant A">
+            <select
+              value={cmpA}
+              onChange={(e) => setCmpA(e.target.value)}
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+            >
+              <option value="current">Current editor config</option>
+              {versions.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Variant B">
+            <select
+              value={cmpB}
+              onChange={(e) => setCmpB(e.target.value)}
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+            >
+              <option value="current">Current editor config</option>
+              {versions.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleCompare();
+          }}
+          className="flex gap-2"
+        >
+          <input
+            value={cmpQuestion}
+            onChange={(e) => setCmpQuestion(e.target.value)}
+            placeholder="One question, sent to both variants…"
+            className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+          />
+          <button
+            disabled={cmpLoading || !cmpQuestion.trim()}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition hover:opacity-90 disabled:opacity-40"
+          >
+            Run
+          </button>
+        </form>
+        {cmpLoading && (
+          <div className="font-mono text-xs text-muted-foreground animate-pulse">
+            running both variants + scoring…
+          </div>
+        )}
+        {cmpResult && (
+          <>
+            <div className="grid gap-4 lg:grid-cols-2">
+              {[["A", cmpResult.a, aScore] as const, ["B", cmpResult.b, bScore] as const].map(
+                ([label, side, score]) => (
+                  <div key={label} className="rounded-lg border border-border bg-secondary p-4">
+                    <div className="mb-2 flex flex-wrap items-center gap-2">
+                      <span className="rounded bg-accent px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-accent-foreground">
+                        Variant {label}
+                      </span>
+                      <span className="truncate text-xs text-muted-foreground">
+                        {label === "A" ? selName(cmpA) : selName(cmpB)}
+                      </span>
+                      {winner === label && (
+                        <span className="rounded bg-success/20 px-1.5 py-0.5 font-mono text-[10px] text-success">
+                          WINNER
+                        </span>
+                      )}
+                    </div>
+                    <p className="whitespace-pre-wrap text-sm leading-relaxed">{side.answer}</p>
+                    <div className="mt-2 flex flex-wrap items-center gap-2 font-mono text-[10px]">
+                      {side.usedFallback && (
+                        <span className="rounded bg-warning/20 px-1.5 py-0.5 text-warning">
+                          FALLBACK
+                        </span>
+                      )}
+                      {score != null && (
+                        <span
+                          className={`rounded px-1.5 py-0.5 ${
+                            score >= 75 ? "bg-success/20 text-success" : "bg-warning/20 text-warning"
+                          }`}
+                          title={side.evaluation?.feedback}
+                        >
+                          QUALITY {score}/100
+                        </span>
+                      )}
+                      <span className="text-muted-foreground">
+                        ⚡ {(side.latencyMs / 1000).toFixed(1)}s
+                      </span>
+                      {side.sources.length > 0 && (
+                        <span className="rounded bg-accent px-1.5 py-0.5 text-accent-foreground" title={side.sources.join("\n")}>
+                          {side.sources.length} SOURCES
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ),
+              )}
+            </div>
+            {winner && winner !== "tie" && (
+              <p className="rounded-lg border border-primary/40 bg-primary/10 p-3 text-sm">
+                <span className="font-semibold">Variant {winner} wins:</span>{" "}
+                {winner === "A" ? aScore : bScore}/100 vs{" "}
+                {winner === "A" ? bScore : aScore}/100 — the higher-scoring prompt handles this
+                question better. Rerun with more questions before deciding.
+              </p>
+            )}
+            {winner === "tie" && (
+              <p className="rounded-lg border border-border bg-secondary p-3 text-sm text-muted-foreground">
+                Both variants scored {aScore}/100. Try a harder or more off-topic question.
+              </p>
+            )}
+          </>
+        )}
+      </div>
+    </>
   );
 
   return (
@@ -329,10 +684,14 @@ function Studio() {
       </header>
 
       <nav className="flex border-b border-border bg-background lg:hidden">
-        {(["prompt", "chat", "metrics"] as const).map((t) => (
+        {(["prompt", "chat", "compare", "metrics"] as const).map((t) => (
           <button
             key={t}
-            onClick={() => setTab(t)}
+            onClick={() => {
+              setTab(t);
+              if (t === "chat") setView("chat");
+              if (t === "compare") setView("compare");
+            }}
             className={`flex-1 py-3 text-sm capitalize transition ${
               tab === t ? "border-b-2 border-primary text-primary" : "text-muted-foreground"
             }`}
@@ -351,91 +710,9 @@ function Studio() {
         </aside>
 
         <section
-          className={`flex h-[calc(100vh-170px)] flex-col rounded-xl border border-border bg-card lg:h-[calc(100vh-120px)] ${tab === "chat" ? "flex" : "hidden"} lg:flex`}
+          className={`flex h-[calc(100vh-170px)] flex-col rounded-xl border border-border bg-card lg:h-[calc(100vh-120px)] ${tab === "chat" || tab === "compare" ? "flex" : "hidden"} lg:flex`}
         >
-          <div className="border-b border-border px-5 py-3">
-            <PanelTitle>Live conversation</PanelTitle>
-            <p className="-mt-2 truncate text-xs text-muted-foreground">{config.useCase}</p>
-          </div>
-          <div className="flex-1 space-y-4 overflow-y-auto p-5">
-            {messages.length === 0 && (
-              <div className="flex h-full flex-col items-center justify-center text-center">
-                <p className="text-lg font-semibold">Test your prompt</p>
-                <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-                  Ask an in-scope question, a follow-up that needs memory, then an off-topic one to
-                  see the fallback trigger.
-                </p>
-              </div>
-            )}
-            {messages.map((m, i) => (
-              <div key={i} className={m.role === "user" ? "flex justify-end" : "flex justify-start"}>
-                <div
-                  className={`max-w-[85%] rounded-xl px-4 py-3 text-sm leading-relaxed ${
-                    m.role === "user"
-                      ? "bg-primary text-primary-foreground"
-                      : "border border-border bg-secondary text-secondary-foreground"
-                  }`}
-                >
-                  <p className="whitespace-pre-wrap">{m.content}</p>
-                  {m.role === "assistant" && (
-                    <div className="mt-2 flex flex-wrap items-center gap-2 font-mono text-[10px]">
-                      {m.usedFallback && (
-                        <span className="rounded bg-warning/20 px-1.5 py-0.5 text-warning">
-                          FALLBACK
-                        </span>
-                      )}
-                      {m.evaluation && (
-                        <span
-                          className={`rounded px-1.5 py-0.5 ${
-                            m.evaluation.score >= 75
-                              ? "bg-success/20 text-success"
-                              : "bg-warning/20 text-warning"
-                          }`}
-                          title={m.evaluation.feedback}
-                        >
-                          QUALITY {m.evaluation.score}/100
-                        </span>
-                      )}
-                      {m.sources && m.sources.length > 0 && (
-                        <span className="rounded bg-accent px-1.5 py-0.5 text-accent-foreground" title={m.sources.join("\n")}>
-                          {m.sources.length} SOURCE{m.sources.length > 1 ? "S" : ""}
-                        </span>
-                      )}
-                      {m.evaluation?.feedback && (
-                        <span className="text-muted-foreground">{m.evaluation.feedback}</span>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-            {loading && (
-              <div className="font-mono text-xs text-muted-foreground animate-pulse">
-                generating + evaluating…
-              </div>
-            )}
-            <div ref={bottomRef} />
-          </div>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleSend();
-            }}
-            className="flex gap-2 border-t border-border p-3"
-          >
-            <input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Type a user message…"
-              className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
-            />
-            <button
-              disabled={loading || !input.trim()}
-              className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition hover:opacity-90 disabled:opacity-40"
-            >
-              Send
-            </button>
-          </form>
+          {view === "chat" ? chatBody : compareBody}
         </section>
 
         <aside
