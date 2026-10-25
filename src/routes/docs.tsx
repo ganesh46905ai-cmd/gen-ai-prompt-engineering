@@ -101,7 +101,28 @@ function Docs() {
           </ul>
         </Section>
 
-        <Section title="5. Tech stack">
+        <Section title="5. Advanced techniques">
+          <ul className="space-y-3 text-sm text-muted-foreground">
+            <li className="rounded-lg border border-border bg-card p-4">
+              <p className="text-sm font-semibold text-foreground">A/B prompt comparison</p>
+              <p className="mt-1">Send one identical question through two prompt configurations at the same time. Each side is scored by the evaluator, and the panel declares a winner with a rationale — proper experiment discipline before you commit a new prompt version.</p>
+            </li>
+            <li className="rounded-lg border border-border bg-card p-4">
+              <p className="text-sm font-semibold text-foreground">Few-shot example conditioning</p>
+              <p className="mt-1">A dedicated field injects 1-2 ideal Q→A demonstrations into the layered prompt, conditioning the model on your exact output style and structure.</p>
+            </li>
+            <li className="rounded-lg border border-border bg-card p-4">
+              <p className="text-sm font-semibold text-foreground">Latency instrumentation</p>
+              <p className="mt-1">Every answer and every A/B side reports its end-to-end latency (generation + evaluation) as a ⚡ badge, so speed is measured alongside quality.</p>
+            </li>
+            <li className="rounded-lg border border-border bg-card p-4">
+              <p className="text-sm font-semibold text-foreground">All-time analytics</p>
+              <p className="mt-1">The metrics panel aggregates every logged conversation: total conversations, average quality score, fallback rate and a sparkline of the last scored answers — across sessions and prompt versions.</p>
+            </li>
+          </ul>
+        </Section>
+
+        <Section title="6. Tech stack">
           <p className="text-sm text-muted-foreground">
             React + TanStack Start, Tailwind CSS, server functions, Lovable Cloud database, Lovable AI
             (GPT model via Responses API, streamed server-side).
