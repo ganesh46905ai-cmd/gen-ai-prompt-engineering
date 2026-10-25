@@ -93,6 +93,14 @@ function Docs() {
           </ol>
         </Section>
 
+        <Section title="4. Expected outcomes">
+          <ul className="space-y-2 text-sm text-muted-foreground">
+            {OUTCOMES.map((o) => (
+              <li key={o}><span className="text-success">✓</span> {o}</li>
+            ))}
+          </ul>
+        </Section>
+
         <Section title="5. Advanced techniques">
           <ul className="space-y-3 text-sm text-muted-foreground">
             <li className="rounded-lg border border-border bg-card p-4">
